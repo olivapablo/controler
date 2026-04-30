@@ -38,12 +38,9 @@
     <!-- HEADER -->
     <header id="app-header">
       <div class="header-left">
-        <button id="btn-back" class="icon-btn hidden" aria-label="Volver">
-          <svg viewBox="0 0 24 24"><path d="M19 12H5M12 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
-        </button>
-        <button id="btn-schools" class="icon-btn hidden" aria-label="Cambiar escuela">
-          <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
-        </button>
+        <div class="header-logo-mini">
+          <svg viewBox="0 0 60 60" fill="none"><rect width="60" height="60" rx="16" fill="var(--primary)"/><path d="M14 20h32M14 30h22M14 40h28" stroke="white" stroke-width="3" stroke-linecap="round"/></svg>
+        </div>
         <div class="header-title-wrap">
           <h1 id="header-title">Gestión de Alumnos</h1>
           <p id="header-sub" class="hidden"></p>
@@ -87,13 +84,30 @@
       <!-- ══ VIEW: SCHOOL SELECTOR ══ -->
       <section id="view-school-selector" class="view">
         <div class="school-selector-container">
-          <h2 class="school-selector-title">Seleccionar Escuela</h2>
+          <div class="welcome-header">
+            <h2>¡Hola, Profe! 👋</h2>
+            <p>Bienvenido/a a tu gestión académica. Seleccioná una escuela para comenzar.</p>
+          </div>
           <div id="school-list" class="school-grid">
             <!-- Schools will be rendered here -->
           </div>
           <button class="btn-add-school" id="btn-open-add-school">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>
             Agregar Escuela
+          </button>
+        </div>
+      </section>
+
+      <!-- ══ VIEW: COURSE SELECTOR ══ -->
+      <section id="view-course-selector" class="view">
+        <div class="school-selector-container">
+          <h2 class="school-selector-title">Seleccionar Curso</h2>
+          <div id="course-list" class="school-grid">
+            <!-- Courses will be rendered here -->
+          </div>
+          <button class="btn-add-school" id="btn-open-add-course">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>
+            Agregar Curso
           </button>
         </div>
       </section>
@@ -339,8 +353,21 @@
 
     </main>
 
-    <!-- BOTTOM NAV (student detail) -->
-    <nav id="bottom-nav" class="hidden"></nav>
+    <!-- BOTTOM NAVIGATION -->
+    <nav id="bottom-nav" class="bottom-nav hidden">
+      <button class="nav-item" id="nav-btn-back">
+        <svg viewBox="0 0 24 24"><path d="M19 12H5M12 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        <span>Volver</span>
+      </button>
+      <button class="nav-item" id="nav-btn-home">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" stroke="currentColor" stroke-width="2" fill="none"/><rect x="14" y="3" width="7" height="7" stroke="currentColor" stroke-width="2" fill="none"/><rect x="14" y="14" width="7" height="7" stroke="currentColor" stroke-width="2" fill="none"/><rect x="3" y="14" width="7" height="7" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-item" id="nav-btn-schools">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        <span>Inicio</span>
+      </button>
+    </nav>
   </div>
 
   <!-- ══ MODALS ══ -->
@@ -606,6 +633,48 @@
       <div class="modal-footer">
         <button class="btn-outline" data-close="modal-school">Cancelar</button>
         <button id="btn-save-school" class="btn-primary">Crear Escuela</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD COURSE -->
+  <div id="modal-course" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-course-title">Nuevo Curso</h2>
+        <button class="modal-close" data-close="modal-course" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="course-name">Nombre del Curso</label>
+          <input type="text" id="course-name" placeholder="Ej: Cuarto año A" class="form-input" />
+        </div>
+        <div class="form-group">
+          <label>Días de clases</label>
+          <div class="days-selector">
+            <label class="day-pill"><input type="checkbox" name="course-days" value="1"><span>Lun</span></label>
+            <label class="day-pill"><input type="checkbox" name="course-days" value="2"><span>Mar</span></label>
+            <label class="day-pill"><input type="checkbox" name="course-days" value="3"><span>Mié</span></label>
+            <label class="day-pill"><input type="checkbox" name="course-days" value="4"><span>Jue</span></label>
+            <label class="day-pill"><input type="checkbox" name="course-days" value="5"><span>Vie</span></label>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="course-schedule">Horario</label>
+            <input type="text" id="course-schedule" placeholder="Ej: 08:00 - 12:00" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label for="course-start-date">Fecha de inicio</label>
+            <input type="date" id="course-start-date" class="form-input" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-outline" data-close="modal-course">Cancelar</button>
+        <button id="btn-save-course" class="btn-primary">Crear Curso</button>
       </div>
     </div>
   </div>

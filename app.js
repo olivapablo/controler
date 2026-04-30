@@ -32,6 +32,9 @@ let state = {
   editingObsId: null,
   editingStudentId: null,
   topicLog: [],
+  courses: [],
+  currentCourseId: null,
+  editingCourseId: null,
 };
 
 // ──────────────────────────────────────────────
@@ -133,6 +136,33 @@ function dbDeleteSchool(id) {
   return db.collection('schools').doc(id).delete();
 }
 
+async function dbGetCourses(schoolId) {
+  try {
+    const snapshot = await db.collection('courses').get();
+    const list = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        list.push(data);
+      }
+    });
+    list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    return list;
+  } catch (err) {
+    console.error("Error obteniendo cursos", err);
+    return [];
+  }
+}
+
+function dbPutCourse(course) {
+  return db.collection('courses').doc(course.id).set(course);
+}
+
+function dbDeleteCourse(id) {
+  return db.collection('courses').doc(id).delete();
+}
+
 // Students
 async function dbGetStudents(schoolId) {
   try {
@@ -140,21 +170,57 @@ async function dbGetStudents(schoolId) {
     const list = [];
     snapshot.forEach(doc => {
       const data = doc.data();
-      // Permissive filter: match schoolId OR (if schoolId is default, match anything without a schoolId)
       const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
       if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
-        list.push(data);
+        const firstCourseId = state.courses.length > 0 ? state.courses[0].id : null;
+        if (data.courseId === state.currentCourseId || (!data.courseId && state.currentCourseId === firstCourseId)) {
+          list.push(data);
+        }
       }
     });
     return list;
-  } catch (err) {
-    console.error("Error obteniendo estudiantes", err);
-    return [];
-  }
+  } catch (err) { console.error("Error fetching students", err); return []; }
+}
+
+async function dbGetContents(schoolId) {
+  try {
+    const snapshot = await db.collection('contents').get();
+    const list = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        const firstCourseId = state.courses.length > 0 ? state.courses[0].id : null;
+        if (data.courseId === state.currentCourseId || (!data.courseId && state.currentCourseId === firstCourseId)) {
+          list.push(data);
+        }
+      }
+    });
+    return list;
+  } catch (err) { console.error("Error fetching contents", err); return []; }
+}
+
+async function dbGetTopics(schoolId) {
+  try {
+    const snapshot = await db.collection('topics').get();
+    const list = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        const firstCourseId = state.courses.length > 0 ? state.courses[0].id : null;
+        if (data.courseId === state.currentCourseId || (!data.courseId && state.currentCourseId === firstCourseId)) {
+          list.push(data);
+        }
+      }
+    });
+    return list;
+  } catch (err) { console.error("Error fetching topics", err); return []; }
 }
 
 function dbPut(student) {
   if (!student.schoolId) student.schoolId = state.currentSchoolId;
+  if (!student.courseId) student.courseId = state.currentCourseId;
   return db.collection(CONFIG.STORE_NAME).doc(student.id).set(student);
 }
 
@@ -163,35 +229,24 @@ function dbDelete(id) {
 }
 
 async function dbClear() {
-  const snapshot = await db.collection(CONFIG.STORE_NAME).where('schoolId', '==', state.currentSchoolId).get();
+  const snapshot = await db.collection(CONFIG.STORE_NAME).get();
   const batch = db.batch();
   snapshot.forEach(doc => {
-    batch.delete(doc.ref);
+    const data = doc.data();
+    const isDefaultSchool = (state.currentSchoolId === 'default_school' || state.currentSchoolId === 'ipem13');
+    if (data.schoolId === state.currentSchoolId || (isDefaultSchool && !data.schoolId)) {
+      const firstCourseId = state.courses.length > 0 ? state.courses[0].id : null;
+      if (data.courseId === state.currentCourseId || (!data.courseId && state.currentCourseId === firstCourseId)) {
+        batch.delete(doc.ref);
+      }
+    }
   });
   return batch.commit();
 }
 
-// Global Contents
-async function dbGetContents(schoolId) {
-  try {
-    const snapshot = await db.collection('contents').orderBy('createdAt', 'asc').get();
-    const list = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
-      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
-        list.push(data);
-      }
-    });
-    return list;
-  } catch (err) {
-    console.error("Error obteniendo contenidos", err);
-    return [];
-  }
-}
-
 function dbPutContent(content) {
   if (!content.schoolId) content.schoolId = state.currentSchoolId;
+  if (!content.courseId) content.courseId = state.currentCourseId;
   return db.collection('contents').doc(content.id).set(content);
 }
 
@@ -199,27 +254,9 @@ function dbDeleteContent(id) {
   return db.collection('contents').doc(id).delete();
 }
 
-// Global Topics
-async function dbGetTopics(schoolId) {
-  try {
-    const snapshot = await db.collection('topics').orderBy('date', 'desc').get();
-    const list = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
-      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
-        list.push(data);
-      }
-    });
-    return list;
-  } catch (err) {
-    console.error("Error obteniendo libro de temas", err);
-    return [];
-  }
-}
-
 function dbPutTopic(topic) {
   if (!topic.schoolId) topic.schoolId = state.currentSchoolId;
+  if (!topic.courseId) topic.courseId = state.currentCourseId;
   return db.collection('topics').doc(topic.id).set(topic);
 }
 
@@ -244,13 +281,20 @@ function getClassDates() {
   const school = state.schools.find(s => s.id === state.currentSchoolId);
   if (!school) return [];
 
+  const course = state.courses.find(c => c.id === state.currentCourseId);
   const dates = [];
   const today = new Date();
   today.setHours(23, 59, 59, 0);
-  
-  const startDate = new Date(school.startDate || CONFIG.START_DATE);
-  const classDays = school.classDays || CONFIG.CLASS_DAYS;
 
+  // Prioritize course settings, fallback to school settings
+  const startDateStr = (course && course.startDate) || (school && school.startDate) || CONFIG.START_DATE;
+  const classDays = (course && course.classDays && course.classDays.length > 0)
+    ? course.classDays
+    : (school && school.classDays && school.classDays.length > 0)
+      ? school.classDays
+      : CONFIG.CLASS_DAYS;
+
+  const startDate = new Date(startDateStr);
   const cur = new Date(startDate);
   cur.setHours(0, 0, 0, 0);
   while (cur <= today) {
@@ -443,6 +487,7 @@ function showConfirm(title, msg, onOk) {
 function showView(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(viewId).classList.add('active');
+  window.scrollTo(0, 0);
 }
 
 function goHome() {
@@ -450,8 +495,10 @@ function goHome() {
   state.currentTab = 'asistencia';
   document.getElementById('header-title').textContent = 'Gestión de Alumnos';
   document.getElementById('header-sub').classList.add('hidden');
-  document.getElementById('btn-back').classList.add('hidden');
-  document.getElementById('btn-schools').classList.remove('hidden');
+  document.getElementById('bottom-nav').classList.remove('hidden');
+  document.getElementById('nav-btn-back').classList.add('hidden');
+  document.getElementById('nav-btn-home').classList.remove('hidden');
+  document.getElementById('nav-btn-schools').classList.remove('hidden');
   document.getElementById('btn-menu').classList.remove('hidden');
   showView('view-home');
   renderHome();
@@ -461,8 +508,7 @@ function goSchools() {
   state.currentSchoolId = null;
   document.getElementById('header-title').textContent = 'Gestión de Alumnos';
   document.getElementById('header-sub').classList.add('hidden');
-  document.getElementById('btn-back').classList.add('hidden');
-  document.getElementById('btn-schools').classList.add('hidden');
+  document.getElementById('bottom-nav').classList.add('hidden');
   document.getElementById('btn-menu').classList.add('hidden');
   showView('view-school-selector');
   renderSchools();
@@ -476,7 +522,10 @@ function goStudent(id) {
   document.getElementById('header-title').textContent = student.name;
   document.getElementById('header-sub').textContent = 'Perfil del estudiante';
   document.getElementById('header-sub').classList.remove('hidden');
-  document.getElementById('btn-back').classList.remove('hidden');
+  document.getElementById('bottom-nav').classList.remove('hidden');
+  document.getElementById('nav-btn-back').classList.remove('hidden');
+  document.getElementById('nav-btn-home').classList.remove('hidden');
+  document.getElementById('nav-btn-schools').classList.add('hidden');
   document.getElementById('btn-menu').classList.add('hidden');
   showView('view-student');
   renderStudentDetail(student);
@@ -964,12 +1013,21 @@ function openAddGrade() {
   const wrap = document.getElementById('grade-custom-content-wrap');
   const nameInput = document.getElementById('grade-name');
 
-  // Populate dropdown with global contents
+  // Populate dropdown with global contents (unique by name, preserving order)
   select.innerHTML = '';
+  const seenNames = new Set();
+  const uniqueNames = [];
   state.contents.forEach(c => {
+    if (!seenNames.has(c.name)) {
+      seenNames.add(c.name);
+      uniqueNames.push(c.name);
+    }
+  });
+
+  uniqueNames.forEach(name => {
     const opt = document.createElement('option');
-    opt.value = c.name;
-    opt.textContent = c.name;
+    opt.value = name;
+    opt.textContent = name;
     select.appendChild(opt);
   });
   const customOpt = document.createElement('option');
@@ -1144,8 +1202,27 @@ function bindEvents() {
   // Theme
   document.getElementById('btn-theme').addEventListener('click', toggleTheme);
 
-  // Back
-  document.getElementById('btn-back').addEventListener('click', goHome);
+  // Bottom navigation listeners
+  document.getElementById('nav-btn-back').addEventListener('click', () => {
+    const currentView = document.querySelector('.view.active').id;
+    if (currentView === 'view-course-selector') {
+      goSchools();
+    } else if (currentView === 'view-school-selector') {
+      // no back from school selector
+    } else {
+      if (currentView !== 'view-home') {
+        goHome();
+      } else {
+        goCourses();
+      }
+    }
+  });
+
+  document.getElementById('nav-btn-home').addEventListener('click', () => {
+    if (state.currentSchoolId && state.currentCourseId) goHome();
+  });
+
+  document.getElementById('nav-btn-schools').addEventListener('click', goSchools);
 
   // Dropdown menu
   const menuBtn = document.getElementById('btn-menu');
@@ -1247,7 +1324,6 @@ function bindEvents() {
   document.getElementById('btn-quick-topic-log')?.addEventListener('click', openTopicLogView);
 
   // Schools
-  document.getElementById('btn-schools').addEventListener('click', goSchools);
   document.getElementById('btn-open-add-school').addEventListener('click', () => {
     document.getElementById('school-name').value = '';
     document.querySelectorAll('input[name="school-days"]').forEach(i => i.checked = false);
@@ -1256,6 +1332,37 @@ function bindEvents() {
     openModal('modal-school');
   });
   document.getElementById('btn-save-school').addEventListener('click', saveSchool);
+
+  // Courses
+  const btnAddCourse = document.getElementById('btn-open-add-course');
+  if (btnAddCourse) {
+    btnAddCourse.addEventListener('click', () => {
+      state.editingCourseId = null;
+      document.getElementById('modal-course-title').textContent = 'Nuevo Curso';
+      document.getElementById('btn-save-course').textContent = 'Crear Curso';
+      document.getElementById('course-name').value = '';
+
+      // Default to current school settings
+      const school = state.schools.find(s => s.id === state.currentSchoolId);
+      if (school) {
+        document.getElementById('course-schedule').value = school.schedule || '';
+        document.getElementById('course-start-date').value = school.startDate || new Date().toISOString().split('T')[0];
+        document.querySelectorAll('input[name="course-days"]').forEach(cb => {
+          cb.checked = (school.classDays || []).includes(parseInt(cb.value));
+        });
+      } else {
+        document.getElementById('course-schedule').value = '';
+        document.getElementById('course-start-date').value = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('input[name="course-days"]').forEach(cb => cb.checked = false);
+      }
+
+      openModal('modal-course');
+    });
+  }
+  const btnSaveCourse = document.getElementById('btn-save-course');
+  if (btnSaveCourse) {
+    btnSaveCourse.addEventListener('click', saveCourse);
+  }
 
   // Topic Log Actions
   document.getElementById('btn-add-topic-entry')?.addEventListener('click', openAddTopic);
@@ -1314,7 +1421,10 @@ function openGradesView() {
   showView('view-grades');
   document.getElementById('header-title').textContent = 'Notas';
   document.getElementById('header-sub').classList.add('hidden');
-  document.getElementById('btn-back').classList.remove('hidden');
+  document.getElementById('bottom-nav').classList.remove('hidden');
+  document.getElementById('nav-btn-back').classList.remove('hidden');
+  document.getElementById('nav-btn-home').classList.remove('hidden');
+  document.getElementById('nav-btn-schools').classList.add('hidden');
   document.getElementById('btn-menu').classList.add('hidden');
   renderGradesMatrix();
 }
@@ -1326,7 +1436,10 @@ function openAttendanceMatrixView() {
   showView('view-attendance-matrix');
   document.getElementById('header-title').textContent = 'Asistencia General';
   document.getElementById('header-sub').classList.add('hidden');
-  document.getElementById('btn-back').classList.remove('hidden');
+  document.getElementById('bottom-nav').classList.remove('hidden');
+  document.getElementById('nav-btn-back').classList.remove('hidden');
+  document.getElementById('nav-btn-home').classList.remove('hidden');
+  document.getElementById('nav-btn-schools').classList.add('hidden');
   document.getElementById('btn-menu').classList.add('hidden');
 
   // Populate month filter if empty
@@ -1527,13 +1640,23 @@ function renderContentList() {
   });
 
   list.querySelectorAll('.content-item-del').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (confirm('¿Seguro que deseas eliminar este contenido?')) {
-        const id = btn.dataset.id;
-        await dbDeleteContent(id);
-        state.contents = state.contents.filter(c => c.id !== id);
-        renderContentList();
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      if (!id) {
+        showToast('⚠️ Error: ID de contenido no encontrado');
+        return;
       }
+      showConfirm('Eliminar contenido', '¿Seguro que deseas eliminar este contenido? La acción no se puede deshacer.', () => {
+        const contentIdStr = String(id);
+        // Optimistic update
+        state.contents = state.contents.filter(c => String(c.id) !== contentIdStr);
+        renderContentList();
+        // Background DB call
+        dbDeleteContent(id).catch(err => {
+          console.error("Error deleting content", err);
+          showToast('⚠️ Error al sincronizar con la nube');
+        });
+      });
     });
   });
 }
@@ -1567,15 +1690,24 @@ async function saveContent() {
   if (!name) return;
 
   const newContent = {
-    id: Date.now().toString(),
+    id: 'cnt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
     name: name,
+    schoolId: state.currentSchoolId,
+    courseId: state.currentCourseId,
     createdAt: new Date().toISOString()
   };
 
-  await dbPutContent(newContent);
+  // Optimistic update
   state.contents.unshift(newContent);
   input.value = '';
   renderContentList();
+
+  // Background DB call
+  dbPutContent(newContent).catch(err => {
+    console.error("Error saving content", err);
+    showToast('⚠️ Error al guardar en la nube');
+    // Optional: revert state if critical
+  });
 }
 
 // ──────────────────────────────────────────────
@@ -1605,7 +1737,7 @@ function openTinderAttendance() {
   showView('view-tinder');
   document.getElementById('header-title').textContent = 'Asistencia';
   document.getElementById('header-sub').classList.add('hidden');
-  document.getElementById('btn-back').classList.add('hidden');
+  document.getElementById('bottom-nav').classList.add('hidden');
   document.getElementById('btn-menu').classList.add('hidden');
 
   renderTinderCards();
@@ -1753,7 +1885,7 @@ async function init() {
   try {
     await initDB();
     state.schools = await dbGetSchools();
-    
+
     // Always ensure the default school exists and is first
     const hasDefault = state.schools.find(s => s.id === 'default_school' || s.id === 'ipem13');
     if (!hasDefault) {
@@ -1825,7 +1957,8 @@ function renderSchools() {
         </button>
       </div>
     </div>
-  `;}).join('');
+  `;
+  }).join('');
 
   list.querySelectorAll('.school-card-info').forEach(info => {
     info.addEventListener('click', () => selectSchool(info.closest('.school-card').dataset.id));
@@ -1849,16 +1982,12 @@ function renderSchools() {
 async function selectSchool(id) {
   state.currentSchoolId = id;
   const school = state.schools.find(s => s.id === id);
-  
-  showToast(`Cargando ${school.name}...`);
-  
-  // Load data for this school
-  state.students = await dbGetStudents(id);
-  state.contents = await dbGetContents(id);
-  state.topicLog = await dbGetTopics(id);
-  
-  syncDatesToStudents();
-  goHome();
+
+  showToast(`Cargando cursos de ${school.name}...`);
+
+  state.courses = await dbGetCourses(id);
+
+  goCourses();
 }
 
 function editSchool(id) {
@@ -1868,11 +1997,11 @@ function editSchool(id) {
   state.editingSchoolId = id;
   document.getElementById('modal-school-title').textContent = 'Editar Escuela';
   document.getElementById('btn-save-school').textContent = 'Guardar Cambios';
-  
+
   document.getElementById('school-name').value = school.name;
   document.getElementById('school-schedule').value = school.schedule || '';
   document.getElementById('school-start-date').value = school.startDate || '';
-  
+
   document.querySelectorAll('input[name="school-days"]').forEach(cb => {
     cb.checked = (school.classDays || []).includes(parseInt(cb.value));
   });
@@ -1885,16 +2014,17 @@ async function deleteSchool(id) {
     showToast('⚠️ No puedes borrar la escuela principal.');
     return;
   }
-  if (!confirm('¿Seguro que quieres borrar esta escuela? Se perderán todos sus datos.')) return;
 
-  try {
-    await dbDeleteSchool(id);
-    state.schools = state.schools.filter(s => s.id !== id);
-    renderSchools();
-    showToast('✅ Escuela eliminada');
-  } catch (err) {
-    showToast('❌ Error al eliminar');
-  }
+  showConfirm('Eliminar escuela', '¿Seguro que quieres borrar esta escuela? Se perderán todos sus datos.', async () => {
+    try {
+      await dbDeleteSchool(id);
+      state.schools = state.schools.filter(s => s.id !== id);
+      renderSchools();
+      showToast('✅ Escuela eliminada');
+    } catch (err) {
+      showToast('❌ Error al eliminar');
+    }
+  });
 }
 
 async function saveSchool() {
@@ -1940,13 +2070,161 @@ async function saveSchool() {
 }
 
 // ──────────────────────────────────────────────
+// COURSE LOGIC
+// ──────────────────────────────────────────────
+function goCourses() {
+  state.currentCourseId = null;
+  document.getElementById('header-title').textContent = 'Seleccionar Curso';
+  document.getElementById('header-sub').classList.add('hidden');
+  document.getElementById('bottom-nav').classList.remove('hidden');
+  document.getElementById('nav-btn-back').classList.remove('hidden');
+  document.getElementById('nav-btn-home').classList.add('hidden');
+  document.getElementById('nav-btn-schools').classList.add('hidden');
+  document.getElementById('btn-menu').classList.add('hidden');
+  showView('view-course-selector');
+  renderCourses();
+}
+
+function renderCourses() {
+  const list = document.getElementById('course-list');
+  list.innerHTML = state.courses.map(c => {
+    const startDisplay = c.startDate ? formatDate(c.startDate) : 'Sin fecha';
+    return `
+    <div class="school-card" data-id="${c.id}">
+      <div class="school-card-info">
+        <div class="school-card-name">${escapeHtml(c.name)}</div>
+        <div class="school-card-meta">
+          🕒 ${escapeHtml(c.schedule || 'Sin horario')}<br>
+          📅 Inicio: ${startDisplay}
+        </div>
+      </div>
+      <div class="school-card-actions">
+        <button class="school-action-btn edit" data-id="${c.id}" title="Editar">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+        <button class="school-action-btn delete" data-id="${c.id}" title="Eliminar">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
+  }).join('');
+
+  list.querySelectorAll('.school-card-info').forEach(info => {
+    info.addEventListener('click', () => selectCourse(info.closest('.school-card').dataset.id));
+  });
+
+  list.querySelectorAll('.school-action-btn.edit').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editCourse(btn.dataset.id);
+    });
+  });
+
+  list.querySelectorAll('.school-action-btn.delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteCourse(btn.dataset.id);
+    });
+  });
+}
+
+async function selectCourse(id) {
+  state.currentCourseId = id;
+  const course = state.courses.find(c => c.id === id);
+  showToast(`Cargando ${course.name}...`);
+
+  state.students = await dbGetStudents(state.currentSchoolId);
+  state.contents = await dbGetContents(state.currentSchoolId);
+  state.topicLog = await dbGetTopics(state.currentSchoolId);
+
+  syncDatesToStudents();
+  goHome();
+}
+
+function editCourse(id) {
+  const course = state.courses.find(c => c.id === id);
+  if (!course) return;
+
+  state.editingCourseId = id;
+  document.getElementById('modal-course-title').textContent = 'Editar Curso';
+  document.getElementById('btn-save-course').textContent = 'Guardar Cambios';
+  document.getElementById('course-name').value = course.name;
+  document.getElementById('course-schedule').value = course.schedule || '';
+  document.getElementById('course-start-date').value = course.startDate || '';
+
+  document.querySelectorAll('input[name="course-days"]').forEach(cb => {
+    cb.checked = (course.classDays || []).includes(parseInt(cb.value));
+  });
+
+  openModal('modal-course');
+}
+
+async function deleteCourse(id) {
+  showConfirm('Eliminar curso', '¿Seguro que quieres borrar este curso? Se perderán todos sus datos.', async () => {
+    try {
+      await dbDeleteCourse(id);
+      state.courses = state.courses.filter(c => c.id !== id);
+      renderCourses();
+      showToast('✅ Curso eliminado');
+    } catch (err) {
+      showToast('❌ Error al eliminar curso');
+    }
+  });
+}
+
+async function saveCourse() {
+  const name = document.getElementById('course-name').value.trim();
+  if (!name) { showToast('⚠️ Ingresá el nombre del curso.'); return; }
+
+  const days = Array.from(document.querySelectorAll('input[name="course-days"]:checked')).map(i => parseInt(i.value));
+  const schedule = document.getElementById('course-schedule').value.trim();
+  const startDate = document.getElementById('course-start-date').value;
+
+  if (state.editingCourseId) {
+    const idx = state.courses.findIndex(c => c.id === state.editingCourseId);
+    if (idx !== -1) {
+      state.courses[idx] = {
+        ...state.courses[idx],
+        name,
+        classDays: days,
+        schedule,
+        startDate: startDate || state.courses[idx].startDate
+      };
+      await dbPutCourse(state.courses[idx]);
+      state.editingCourseId = null;
+      showToast('✅ Curso actualizado');
+    }
+  } else {
+    const newCourse = {
+      id: 'course_' + Date.now().toString(36),
+      schoolId: state.currentSchoolId,
+      name,
+      classDays: days,
+      schedule,
+      startDate: startDate || new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString()
+    };
+    await dbPutCourse(newCourse);
+    state.courses.push(newCourse);
+    showToast('✅ Curso creado');
+  }
+
+  closeModal('modal-course');
+  document.getElementById('modal-course-title').textContent = 'Nuevo Curso';
+  document.getElementById('btn-save-course').textContent = 'Crear Curso';
+  renderCourses();
+}
+
+// ──────────────────────────────────────────────
 // TOPIC LOG VIEW
 // ──────────────────────────────────────────────
 function openTopicLogView() {
   showView('view-topic-log');
   document.getElementById('header-title').textContent = 'Libro de Temas';
   document.getElementById('header-sub').classList.add('hidden');
-  document.getElementById('btn-back').classList.remove('hidden');
+  document.getElementById('bottom-nav').classList.remove('hidden');
+  document.getElementById('nav-btn-back').classList.remove('hidden');
   document.getElementById('btn-menu').classList.add('hidden');
   renderTopicLog();
 }
@@ -1962,13 +2240,13 @@ function renderTopicLog() {
   }
 
   empty.classList.add('hidden');
-  // Sort by date descending
-  const sorted = [...state.topicLog].sort((a, b) => b.date.localeCompare(a.date));
+  // Sort by date ascending
+  const sorted = [...state.topicLog].sort((a, b) => a.date.localeCompare(b.date));
 
   body.innerHTML = sorted.map(t => {
     const [y, m, d] = t.date.split('-');
     const simpleDate = `${d}/${m}/${y}`;
-    
+
     let typeClass = 'badge-gray';
     if (t.type === 'Teórico') typeClass = 'badge-teorico';
     else if (t.type === 'Práctico') typeClass = 'badge-practico';
@@ -1993,7 +2271,17 @@ function renderTopicLog() {
 
 function openAddTopic() {
   const select = document.getElementById('topic-content-select');
-  select.innerHTML = state.contents.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  // Populate with unique names, preserving order
+  const uniqueContents = [];
+  const seenNames = new Set();
+  state.contents.forEach(c => {
+    if (!seenNames.has(c.name)) {
+      seenNames.add(c.name);
+      uniqueContents.push(c);
+    }
+  });
+
+  select.innerHTML = uniqueContents.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 
   document.getElementById('topic-date').value = new Date().toISOString().split('T')[0];
   document.getElementById('topic-obs').value = '';
@@ -2030,11 +2318,17 @@ async function saveTopic() {
 }
 
 async function deleteTopicEntry(id) {
-  if (confirm('¿Deseas eliminar este registro del libro de temas?')) {
-    await dbDeleteTopic(id);
-    state.topicLog = state.topicLog.filter(t => t.id !== id);
+  showConfirm('Eliminar registro', '¿Deseas eliminar este registro del libro de temas?', () => {
+    const topicIdStr = String(id);
+    // Optimistic update
+    state.topicLog = state.topicLog.filter(t => String(t.id) !== topicIdStr);
     renderTopicLog();
-  }
+    // Background DB call
+    dbDeleteTopic(id).catch(err => {
+      console.error("Error deleting topic", err);
+      showToast('⚠️ Error al eliminar en la nube');
+    });
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);
