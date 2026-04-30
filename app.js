@@ -20,6 +20,9 @@ const CONFIG = {
 // STATE
 // ──────────────────────────────────────────────
 let state = {
+  schools: [],
+  currentSchoolId: null,
+  editingSchoolId: null,
   students: [],
   contents: [],
   currentStudentId: null,
@@ -49,7 +52,14 @@ if (!firebase.apps.length) {
 const db = firebase.firestore();
 
 function initDB() {
-  return Promise.resolve(); // Firebase inicializa de forma síncrona
+  // Enable offline persistence for faster loading and offline support
+  return db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+    if (err.code == 'failed-precondition') {
+      console.warn('Multiple tabs open, persistence enabled in only one tab.');
+    } else if (err.code == 'unimplemented') {
+      console.warn('Browser does not support persistence');
+    }
+  });
 }
 
 async function dbGetAll() {
@@ -102,12 +112,105 @@ function dbDeleteContent(id) {
   return db.collection('contents').doc(id).delete();
 }
 
+// Schools
+async function dbGetSchools() {
+  try {
+    const snapshot = await db.collection('schools').orderBy('createdAt', 'asc').get();
+    const list = [];
+    snapshot.forEach(doc => list.push(doc.data()));
+    return list;
+  } catch (err) {
+    console.error("Error obteniendo escuelas", err);
+    return [];
+  }
+}
+
+function dbPutSchool(school) {
+  return db.collection('schools').doc(school.id).set(school);
+}
+
+function dbDeleteSchool(id) {
+  return db.collection('schools').doc(id).delete();
+}
+
+// Students
+async function dbGetStudents(schoolId) {
+  try {
+    const snapshot = await db.collection(CONFIG.STORE_NAME).get();
+    const list = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      // Permissive filter: match schoolId OR (if schoolId is default, match anything without a schoolId)
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        list.push(data);
+      }
+    });
+    return list;
+  } catch (err) {
+    console.error("Error obteniendo estudiantes", err);
+    return [];
+  }
+}
+
+function dbPut(student) {
+  if (!student.schoolId) student.schoolId = state.currentSchoolId;
+  return db.collection(CONFIG.STORE_NAME).doc(student.id).set(student);
+}
+
+function dbDelete(id) {
+  return db.collection(CONFIG.STORE_NAME).doc(id).delete();
+}
+
+async function dbClear() {
+  const snapshot = await db.collection(CONFIG.STORE_NAME).where('schoolId', '==', state.currentSchoolId).get();
+  const batch = db.batch();
+  snapshot.forEach(doc => {
+    batch.delete(doc.ref);
+  });
+  return batch.commit();
+}
+
+// Global Contents
+async function dbGetContents(schoolId) {
+  try {
+    const snapshot = await db.collection('contents').orderBy('createdAt', 'asc').get();
+    const list = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        list.push(data);
+      }
+    });
+    return list;
+  } catch (err) {
+    console.error("Error obteniendo contenidos", err);
+    return [];
+  }
+}
+
+function dbPutContent(content) {
+  if (!content.schoolId) content.schoolId = state.currentSchoolId;
+  return db.collection('contents').doc(content.id).set(content);
+}
+
+function dbDeleteContent(id) {
+  return db.collection('contents').doc(id).delete();
+}
+
 // Global Topics
-async function dbGetTopics() {
+async function dbGetTopics(schoolId) {
   try {
     const snapshot = await db.collection('topics').orderBy('date', 'desc').get();
     const list = [];
-    snapshot.forEach(doc => list.push(doc.data()));
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        list.push(data);
+      }
+    });
     return list;
   } catch (err) {
     console.error("Error obteniendo libro de temas", err);
@@ -116,6 +219,7 @@ async function dbGetTopics() {
 }
 
 function dbPutTopic(topic) {
+  if (!topic.schoolId) topic.schoolId = state.currentSchoolId;
   return db.collection('topics').doc(topic.id).set(topic);
 }
 
@@ -137,13 +241,20 @@ const HOLIDAYS_2026 = {
 };
 
 function getClassDates() {
+  const school = state.schools.find(s => s.id === state.currentSchoolId);
+  if (!school) return [];
+
   const dates = [];
   const today = new Date();
   today.setHours(23, 59, 59, 0);
-  const cur = new Date(CONFIG.START_DATE);
+  
+  const startDate = new Date(school.startDate || CONFIG.START_DATE);
+  const classDays = school.classDays || CONFIG.CLASS_DAYS;
+
+  const cur = new Date(startDate);
   cur.setHours(0, 0, 0, 0);
   while (cur <= today) {
-    if (CONFIG.CLASS_DAYS.includes(cur.getDay())) {
+    if (classDays.includes(cur.getDay())) {
       dates.push(cur.toISOString().split('T')[0]);
     }
     cur.setDate(cur.getDate() + 1);
@@ -152,7 +263,9 @@ function getClassDates() {
 }
 
 function formatDate(isoString) {
+  if (!isoString) return '-';
   const d = new Date(isoString + 'T12:00:00');
+  if (isNaN(d.getTime())) return '-';
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
@@ -338,9 +451,21 @@ function goHome() {
   document.getElementById('header-title').textContent = 'Gestión de Alumnos';
   document.getElementById('header-sub').classList.add('hidden');
   document.getElementById('btn-back').classList.add('hidden');
+  document.getElementById('btn-schools').classList.remove('hidden');
   document.getElementById('btn-menu').classList.remove('hidden');
   showView('view-home');
   renderHome();
+}
+
+function goSchools() {
+  state.currentSchoolId = null;
+  document.getElementById('header-title').textContent = 'Gestión de Alumnos';
+  document.getElementById('header-sub').classList.add('hidden');
+  document.getElementById('btn-back').classList.add('hidden');
+  document.getElementById('btn-schools').classList.add('hidden');
+  document.getElementById('btn-menu').classList.add('hidden');
+  showView('view-school-selector');
+  renderSchools();
 }
 
 function goStudent(id) {
@@ -1121,6 +1246,17 @@ function bindEvents() {
   document.getElementById('btn-quick-attendance-view')?.addEventListener('click', openAttendanceMatrixView);
   document.getElementById('btn-quick-topic-log')?.addEventListener('click', openTopicLogView);
 
+  // Schools
+  document.getElementById('btn-schools').addEventListener('click', goSchools);
+  document.getElementById('btn-open-add-school').addEventListener('click', () => {
+    document.getElementById('school-name').value = '';
+    document.querySelectorAll('input[name="school-days"]').forEach(i => i.checked = false);
+    document.getElementById('school-schedule').value = '';
+    document.getElementById('school-start-date').value = new Date().toISOString().split('T')[0];
+    openModal('modal-school');
+  });
+  document.getElementById('btn-save-school').addEventListener('click', saveSchool);
+
   // Topic Log Actions
   document.getElementById('btn-add-topic-entry')?.addEventListener('click', openAddTopic);
   document.getElementById('btn-save-topic')?.addEventListener('click', saveTopic);
@@ -1616,37 +1752,191 @@ async function init() {
   // Init DB
   try {
     await initDB();
-    state.students = await dbGetAll();
-    state.contents = await dbGetContents();
-    state.topicLog = await dbGetTopics();
-    syncDatesToStudents();
+    state.schools = await dbGetSchools();
+    
+    // Always ensure the default school exists and is first
+    const hasDefault = state.schools.find(s => s.id === 'default_school' || s.id === 'ipem13');
+    if (!hasDefault) {
+      const defaultSchool = {
+        id: 'default_school',
+        name: 'IPEM N° 13: Dr. Pedro Escudero',
+        classDays: [2, 4],
+        schedule: '8:00 - 12:00',
+        startDate: '2026-03-17',
+        createdAt: new Date(2020, 0, 1).toISOString() // Ensure it's first
+      };
+      await dbPutSchool(defaultSchool);
+      state.schools.unshift(defaultSchool);
+    } else {
+      // Ensure the first school (which should be the default one) has the correct ID for data mapping
+      const first = state.schools[0];
+      if (first.id !== 'default_school' && first.name.includes('IPEM')) {
+        // Migration of ID if needed, but let's assume 'default_school' is used for migration
+      }
+    }
   } catch (e) {
-    console.warn('IndexedDB unavailable, falling back to localStorage');
-    // Fallback localStorage
-    const raw = localStorage.getItem('edutrack-students');
-    state.students = raw ? JSON.parse(raw) : [];
+    console.error('Error inicializando DB', e);
   }
 
   // Bind events
   bindEvents();
 
-  // Render home
-  renderHome();
+  // Show selector
+  goSchools();
 
-  // Hide splash
+  // Hide splash immediately when ready
   const splash = document.getElementById('splash');
-  setTimeout(() => {
+  if (splash) {
     splash.classList.add('fade-out');
     setTimeout(() => {
       splash.remove();
       document.getElementById('app').classList.remove('hidden');
-    }, 500);
-  }, 900);
+    }, 400);
+  }
 
   // Register service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('service-worker.js').catch(() => { });
   }
+}
+
+// ──────────────────────────────────────────────
+// SCHOOL LOGIC
+// ──────────────────────────────────────────────
+function renderSchools() {
+  const list = document.getElementById('school-list');
+  list.innerHTML = state.schools.map(s => {
+    const startDisplay = s.startDate ? formatDate(s.startDate) : 'Sin fecha';
+    return `
+    <div class="school-card" data-id="${s.id}">
+      <div class="school-card-info">
+        <div class="school-card-name">${escapeHtml(s.name)}</div>
+        <div class="school-card-meta">
+          🕒 ${escapeHtml(s.schedule || 'Sin horario')}<br>
+          📅 Inicio: ${startDisplay}
+        </div>
+      </div>
+      <div class="school-card-actions">
+        <button class="school-action-btn edit" data-id="${s.id}" title="Editar">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+        <button class="school-action-btn delete" data-id="${s.id}" title="Eliminar">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+      </div>
+    </div>
+  `;}).join('');
+
+  list.querySelectorAll('.school-card-info').forEach(info => {
+    info.addEventListener('click', () => selectSchool(info.closest('.school-card').dataset.id));
+  });
+
+  list.querySelectorAll('.school-action-btn.edit').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editSchool(btn.dataset.id);
+    });
+  });
+
+  list.querySelectorAll('.school-action-btn.delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteSchool(btn.dataset.id);
+    });
+  });
+}
+
+async function selectSchool(id) {
+  state.currentSchoolId = id;
+  const school = state.schools.find(s => s.id === id);
+  
+  showToast(`Cargando ${school.name}...`);
+  
+  // Load data for this school
+  state.students = await dbGetStudents(id);
+  state.contents = await dbGetContents(id);
+  state.topicLog = await dbGetTopics(id);
+  
+  syncDatesToStudents();
+  goHome();
+}
+
+function editSchool(id) {
+  const school = state.schools.find(s => s.id === id);
+  if (!school) return;
+
+  state.editingSchoolId = id;
+  document.getElementById('modal-school-title').textContent = 'Editar Escuela';
+  document.getElementById('btn-save-school').textContent = 'Guardar Cambios';
+  
+  document.getElementById('school-name').value = school.name;
+  document.getElementById('school-schedule').value = school.schedule || '';
+  document.getElementById('school-start-date').value = school.startDate || '';
+  
+  document.querySelectorAll('input[name="school-days"]').forEach(cb => {
+    cb.checked = (school.classDays || []).includes(parseInt(cb.value));
+  });
+
+  openModal('modal-school');
+}
+
+async function deleteSchool(id) {
+  if (id === 'default_school' || id === 'ipem13') {
+    showToast('⚠️ No puedes borrar la escuela principal.');
+    return;
+  }
+  if (!confirm('¿Seguro que quieres borrar esta escuela? Se perderán todos sus datos.')) return;
+
+  try {
+    await dbDeleteSchool(id);
+    state.schools = state.schools.filter(s => s.id !== id);
+    renderSchools();
+    showToast('✅ Escuela eliminada');
+  } catch (err) {
+    showToast('❌ Error al eliminar');
+  }
+}
+
+async function saveSchool() {
+  const name = document.getElementById('school-name').value.trim();
+  if (!name) { showToast('⚠️ Ingresá el nombre de la escuela.'); return; }
+
+  const days = Array.from(document.querySelectorAll('input[name="school-days"]:checked')).map(i => parseInt(i.value));
+  const schedule = document.getElementById('school-schedule').value.trim();
+  const startDate = document.getElementById('school-start-date').value;
+
+  if (state.editingSchoolId) {
+    const idx = state.schools.findIndex(s => s.id === state.editingSchoolId);
+    if (idx !== -1) {
+      state.schools[idx] = {
+        ...state.schools[idx],
+        name,
+        classDays: days,
+        schedule,
+        startDate: startDate || state.schools[idx].startDate
+      };
+      await dbPutSchool(state.schools[idx]);
+      state.editingSchoolId = null;
+      showToast('✅ Escuela actualizada');
+    }
+  } else {
+    const newSchool = {
+      id: 'school_' + Date.now().toString(36),
+      name,
+      classDays: days,
+      schedule,
+      startDate: startDate || new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString()
+    };
+    await dbPutSchool(newSchool);
+    state.schools.push(newSchool);
+    showToast('✅ Escuela creada');
+  }
+
+  closeModal('modal-school');
+  document.getElementById('modal-school-title').textContent = 'Nueva Escuela';
+  document.getElementById('btn-save-school').textContent = 'Crear Escuela';
+  renderSchools();
 }
 
 // ──────────────────────────────────────────────

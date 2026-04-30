@@ -3,7 +3,7 @@
    Estrategia: Cache-first para assets, Network-first para datos
    ═══════════════════════════════════════════════ */
 
-const CACHE_NAME = 'edutrack-v1.2';
+const CACHE_NAME = 'edutrack-v1.3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
