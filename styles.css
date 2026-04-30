@@ -58,6 +58,10 @@
   --transition:      0.2s cubic-bezier(0.4,0,0.2,1);
   --transition-fast: 0.12s cubic-bezier(0.4,0,0.2,1);
   --transition-slow: 0.35s cubic-bezier(0.4,0,0.2,1);
+  --nav-bg:      #FFFFFF;
+  --nav-border:  #E5E7EB;
+  --nav-text:    #64748B;
+  --nav-active:  #1E3A8A;
 }
 
 [data-theme="dark"] {
@@ -95,6 +99,10 @@
   --shadow:    0 4px 12px rgba(0,0,0,0.45);
   --shadow-lg: 0 10px 30px rgba(0,0,0,0.5);
   --shadow-xl: 0 20px 50px rgba(0,0,0,0.6);
+  --nav-bg:      linear-gradient(135deg, #0B1324 0%, #1E3A8A 100%);
+  --nav-border:  rgba(255, 255, 255, 0.08);
+  --nav-text:    rgba(255, 255, 255, 0.65);
+  --nav-active:  #FFFFFF;
 }
 
 [data-theme="dark"] #header-title {
@@ -144,7 +152,7 @@ img { max-width: 100%; }
   display: flex; flex-direction: column; align-items: center; gap: 16px;
   animation: splash-in 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards;
 }
-.splash-logo svg { width: 80px; height: 80px; filter: drop-shadow(0 8px 20px rgba(0,0,0,0.3)); }
+.splash-logo svg, .splash-logo img { width: 80px; height: 80px; filter: drop-shadow(0 8px 20px rgba(0,0,0,0.3)); }
 .splash-logo span {
   font-family: var(--font-title);
   font-size: 36px; color: var(--text);
@@ -164,16 +172,21 @@ img { max-width: 100%; }
 #app-header {
   position: sticky; top: 0; z-index: 100;
   height: var(--header-h);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--nav-border);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
   gap: 12px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: background var(--transition-slow), border-color var(--transition-slow);
+  transition: all var(--transition-slow);
   box-shadow: var(--shadow-sm);
 }
+#app-header #header-title { color: var(--primary) !important; }
+[data-theme="dark"] #app-header #header-title { color: white !important; }
+#app-header #header-sub { color: var(--text-muted); }
+#app-header .icon-btn { color: var(--text); }
+#app-header .icon-btn:hover { background: var(--bg-2); }
 
 .header-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; margin-right: 12px; }
 .header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -1452,7 +1465,7 @@ textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--prima
 .bottom-nav {
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  height: 64px;
+  height: calc(64px + var(--safe-bottom));
   background: var(--surface);
   border-top: 1px solid var(--border);
   display: flex;
@@ -1461,6 +1474,11 @@ textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--prima
   padding-bottom: var(--safe-bottom);
   z-index: 100;
   box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  transition: all var(--transition-slow);
+}
+[data-theme="dark"] .bottom-nav {
+  background: var(--nav-bg);
+  border-top-color: var(--nav-border);
 }
 .bottom-nav.hidden { display: none !important; }
 .nav-item {
@@ -1470,10 +1488,27 @@ textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--prima
   justify-content: center;
   gap: 4px;
   flex: 1;
-  color: var(--text-muted);
-  transition: color var(--transition-fast);
+  color: white;
+  background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%);
+  border-radius: 8px;
+  margin: 8px 6px;
+  height: 48px;
+  transition: all var(--transition-fast);
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.2);
 }
-.nav-item:hover, .nav-item:active { color: var(--primary); }
-.nav-item svg { width: 22px; height: 22px; }
-.nav-item span { font-size: 11px; font-weight: 600; }
+[data-theme="dark"] .nav-item {
+  background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
+  box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+}
+.nav-item:hover, .nav-item:active, .nav-item.active { 
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(220, 38, 38, 0.35);
+  filter: brightness(1.1);
+}
+[data-theme="dark"] .nav-item:hover, [data-theme="dark"] .nav-item:active, [data-theme="dark"] .nav-item.active {
+  box-shadow: 0 6px 15px rgba(30, 58, 138, 0.5);
+}
+.nav-item:active { transform: scale(0.95); }
+.nav-item svg { width: 20px; height: 20px; }
+.nav-item span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 
