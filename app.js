@@ -55,12 +55,19 @@ if (!firebase.apps.length) {
 const db = firebase.firestore();
 
 function initDB() {
+  if (typeof firebase === 'undefined') {
+    console.error('Firebase SDK not loaded');
+    return Promise.reject('Firebase not found');
+  }
   // Enable offline persistence for faster loading and offline support
-  return db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+  // Note: synchronizeTabs: true is removed as it can cause issues on some mobile environments
+  return db.enablePersistence().catch(err => {
     if (err.code == 'failed-precondition') {
-      console.warn('Multiple tabs open, persistence enabled in only one tab.');
+      console.warn('Persistence failed-precondition (multiple tabs or other issue)');
     } else if (err.code == 'unimplemented') {
       console.warn('Browser does not support persistence');
+    } else {
+      console.error('Persistence error:', err);
     }
   });
 }
@@ -1876,59 +1883,78 @@ async function handleTinderAction(isPresent) {
 // INIT
 // ──────────────────────────────────────────────
 async function init() {
-  // Theme
-  const savedTheme = localStorage.getItem('edutrack-theme') || 'auto';
-  state.theme = savedTheme;
-  applyTheme(savedTheme);
-
-  // Init DB
+  console.log('Init started');
+  // 1. Theme (Fast, no blocking)
   try {
-    await initDB();
-    state.schools = await dbGetSchools();
+    const savedTheme = localStorage.getItem('edutrack-theme') || 'auto';
+    state.theme = savedTheme;
+    applyTheme(savedTheme);
+  } catch (e) { console.warn('Theme init failed', e); }
 
-    // Always ensure the default school exists and is first
-    const hasDefault = state.schools.find(s => s.id === 'default_school' || s.id === 'ipem13');
-    if (!hasDefault) {
-      const defaultSchool = {
-        id: 'default_school',
-        name: 'IPEM N° 13: Dr. Pedro Escudero',
-        classDays: [2, 4],
-        schedule: '8:00 - 12:00',
-        startDate: '2026-03-17',
-        createdAt: new Date(2020, 0, 1).toISOString() // Ensure it's first
-      };
-      await dbPutSchool(defaultSchool);
-      state.schools.unshift(defaultSchool);
-    } else {
-      // Ensure the first school (which should be the default one) has the correct ID for data mapping
-      const first = state.schools[0];
-      if (first.id !== 'default_school' && first.name.includes('IPEM')) {
-        // Migration of ID if needed, but let's assume 'default_school' is used for migration
+  // 2. Bind events (Fast, no blocking)
+  try {
+    bindEvents();
+  } catch (e) { console.error('Error binding events', e); }
+
+  // 3. Init DB and Load Data (Could be slow)
+  let dbInitialized = false;
+  try {
+    if (typeof firebase !== 'undefined') {
+      await initDB();
+      state.schools = await dbGetSchools();
+      dbInitialized = true;
+      
+      // Ensure default school
+      const hasDefault = state.schools.find(s => s.id === 'default_school' || s.id === 'ipem13');
+      if (!hasDefault) {
+        const defaultSchool = {
+          id: 'default_school',
+          name: 'IPEM N° 13: Dr. Pedro Escudero',
+          classDays: [2, 4],
+          schedule: '8:00 - 12:00',
+          startDate: '2026-03-17',
+          createdAt: new Date(2020, 0, 1).toISOString()
+        };
+        await dbPutSchool(defaultSchool);
+        state.schools.unshift(defaultSchool);
       }
+    } else {
+      console.error('Firebase not available at init');
     }
   } catch (e) {
-    console.error('Error inicializando DB', e);
+    console.error('Error initializing data', e);
   }
 
-  // Bind events
-  bindEvents();
+  // 4. Show initial view
+  try {
+    goSchools();
+  } catch (e) { console.error('Error showing schools view', e); }
 
-  // Show selector
-  goSchools();
+  // 5. Hide splash (MUST HAPPEN)
+  const hideSplash = () => {
+    const splash = document.getElementById('splash');
+    if (splash && !splash.classList.contains('fade-out')) {
+      splash.classList.add('fade-out');
+      setTimeout(() => {
+        splash.remove();
+        const appEl = document.getElementById('app');
+        if (appEl) appEl.classList.remove('hidden');
+      }, 400);
+    }
+  };
 
-  // Hide splash immediately when ready
-  const splash = document.getElementById('splash');
-  if (splash) {
-    splash.classList.add('fade-out');
-    setTimeout(() => {
-      splash.remove();
-      document.getElementById('app').classList.remove('hidden');
-    }, 400);
-  }
+  // Fallback: hide splash after 4 seconds regardless of DB state
+  const splashFallback = setTimeout(hideSplash, 4000);
 
-  // Register service worker
+  // If DB initialized or failed, hide splash. 
+  hideSplash();
+  clearTimeout(splashFallback);
+
+  // 6. Register service worker (Non-blocking)
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js').catch(() => { });
+    navigator.serviceWorker.register('service-worker.js').catch(err => {
+      console.warn('SW registration failed', err);
+    });
   }
 }
 
