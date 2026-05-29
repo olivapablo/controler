@@ -35,6 +35,7 @@ let state = {
   courses: [],
   currentCourseId: null,
   editingCourseId: null,
+  nonClassDays: [],
 };
 
 // ──────────────────────────────────────────────
@@ -225,6 +226,37 @@ async function dbGetTopics(schoolId) {
   } catch (err) { console.error("Error fetching topics", err); return []; }
 }
 
+// Non-class days (Suspended classes)
+async function dbGetNonClassDays(schoolId, courseId) {
+  try {
+    const snapshot = await db.collection('nonClassDays').get();
+    const list = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const isDefaultSchool = (schoolId === 'default_school' || schoolId === 'ipem13');
+      if (data.schoolId === schoolId || (isDefaultSchool && !data.schoolId)) {
+        if (data.courseId === courseId) {
+          list.push(data);
+        }
+      }
+    });
+    return list;
+  } catch (err) {
+    console.error("Error fetching non-class days", err);
+    return [];
+  }
+}
+
+function dbPutNonClassDay(ncd) {
+  if (!ncd.schoolId) ncd.schoolId = state.currentSchoolId;
+  if (!ncd.courseId) ncd.courseId = state.currentCourseId;
+  return db.collection('nonClassDays').doc(ncd.id).set(ncd);
+}
+
+function dbDeleteNonClassDay(id) {
+  return db.collection('nonClassDays').doc(id).delete();
+}
+
 function dbPut(student) {
   if (!student.schoolId) student.schoolId = state.currentSchoolId;
   if (!student.courseId) student.courseId = state.currentCourseId;
@@ -373,7 +405,8 @@ function getAttendanceStats(student) {
   const dates = getClassDates();
   let present = 0, absent = 0, pending = 0, total = 0;
   dates.forEach(d => {
-    if (HOLIDAYS_2026[d]) return; // Skip holidays for stats
+    const isCustomNonClass = state.nonClassDays.find(ncd => ncd.date === d);
+    if (HOLIDAYS_2026[d] || isCustomNonClass) return; // Skip holidays for stats
 
     total++;
     const val = student.attendance[d];
@@ -388,8 +421,10 @@ function getAttendanceStats(student) {
 
 function getAverage(grades) {
   if (!grades || grades.length === 0) return null;
-  const sum = grades.reduce((a, g) => a + g.value, 0);
-  return (sum / grades.length).toFixed(1);
+  const numericGrades = grades.filter(g => typeof g.value === 'number');
+  if (numericGrades.length === 0) return null;
+  const sum = numericGrades.reduce((a, g) => a + g.value, 0);
+  return (sum / numericGrades.length).toFixed(1);
 }
 
 function getInitials(name) {
@@ -642,6 +677,21 @@ function renderStudentDetail(student) {
     ${student.active === false ? '<span class="mini-badge red">DESACTIVADO</span>' : ''}
   `;
 
+  // Render text observations below badges
+  const obsEl = document.getElementById('detail-obs-text');
+  if (obsEl) {
+    const latestObs = student.observations && student.observations.length > 0 ? student.observations[student.observations.length - 1] : null;
+    if (latestObs) {
+      obsEl.innerHTML = `📝 <strong>Observación:</strong> ${escapeHtml(latestObs.text)}`;
+      obsEl.className = 'profile-obs-text';
+      obsEl.style.display = 'inline-block';
+    } else {
+      obsEl.innerHTML = '';
+      obsEl.className = 'hidden';
+      obsEl.style.display = 'none';
+    }
+  }
+
   // Reset tabs
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -712,15 +762,17 @@ function renderAttendance(student) {
 
   listEl.innerHTML = dates.map(d => {
     const isHoliday = HOLIDAYS_2026[d];
+    const customNonClass = state.nonClassDays.find(ncd => ncd.date === d);
     const val = student.attendance[d];
     const dayName = getDayName(d);
 
-    if (isHoliday) {
+    if (isHoliday || customNonClass) {
+      const reason = isHoliday || (customNonClass && customNonClass.reason);
       return `
       <div class="attend-row holiday-row">
         <div class="attend-date" style="text-decoration: line-through; opacity: 0.6;">${formatDate(d)}</div>
         <span class="attend-day-badge">${dayName}</span>
-        <div class="holiday-label">${isHoliday}</div>
+        <div class="holiday-label">${escapeHtml(reason)}</div>
       </div>`;
     }
 
@@ -1175,7 +1227,8 @@ async function importData(file) {
       await dbClear();
       state.students = data.students;
       syncDatesToStudents();
-      for (const s of state.students) await dbPut(s);
+      // Guardar todos los estudiantes en paralelo en lugar de secuencialmente (mucho más rápido)
+      await Promise.all(state.students.map(s => dbPut(s)));
       renderHome();
       showToast(`✅ ${data.students.length} estudiantes importados`);
     });
@@ -1325,6 +1378,8 @@ function bindEvents() {
   // Quick Actions (Home)
   document.getElementById('btn-quick-attendance')?.addEventListener('click', openTinderAttendance);
   document.getElementById('btn-quick-add')?.addEventListener('click', openAddStudent);
+  document.getElementById('btn-quick-non-class')?.addEventListener('click', openNonClassModal);
+  document.getElementById('btn-add-non-class')?.addEventListener('click', saveNonClassDay);
   document.getElementById('btn-quick-content')?.addEventListener('click', openContentModal);
   document.getElementById('btn-quick-grades')?.addEventListener('click', openGradesView);
   document.getElementById('btn-quick-attendance-view')?.addEventListener('click', openAttendanceMatrixView);
@@ -2160,9 +2215,18 @@ async function selectCourse(id) {
   const course = state.courses.find(c => c.id === id);
   showToast(`Cargando ${course.name}...`);
 
-  state.students = await dbGetStudents(state.currentSchoolId);
-  state.contents = await dbGetContents(state.currentSchoolId);
-  state.topicLog = await dbGetTopics(state.currentSchoolId);
+  // Descargar toda la información del curso en paralelo en lugar de secuencialmente (4 veces más rápido)
+  const [students, contents, topicLog, nonClassDays] = await Promise.all([
+    dbGetStudents(state.currentSchoolId),
+    dbGetContents(state.currentSchoolId),
+    dbGetTopics(state.currentSchoolId),
+    dbGetNonClassDays(state.currentSchoolId, state.currentCourseId)
+  ]);
+
+  state.students = students;
+  state.contents = contents;
+  state.topicLog = topicLog;
+  state.nonClassDays = nonClassDays;
 
   syncDatesToStudents();
   goHome();
@@ -2354,6 +2418,110 @@ async function deleteTopicEntry(id) {
       console.error("Error deleting topic", err);
       showToast('⚠️ Error al eliminar en la nube');
     });
+  });
+}
+
+// ──────────────────────────────────────────────
+// DÍAS SIN CLASE
+// ──────────────────────────────────────────────
+function openNonClassModal() {
+  document.getElementById('non-class-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('non-class-reason').value = '';
+  renderNonClassList();
+  openModal('modal-non-class');
+}
+
+function renderNonClassList() {
+  const list = document.getElementById('non-class-list');
+  if (!list) return;
+  list.innerHTML = '';
+  
+  if (state.nonClassDays.length === 0) {
+    list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);padding:8px;text-align:center;">No hay fechas registradas.</p>';
+    return;
+  }
+
+  // Sort by date descending
+  const sorted = [...state.nonClassDays].sort((a, b) => b.date.localeCompare(a.date));
+
+  sorted.forEach((ncd) => {
+    const item = document.createElement('div');
+    item.className = 'content-item';
+    item.innerHTML = `
+      <div>
+        <strong style="color:var(--primary); font-size:14px;">${formatDate(ncd.date)}</strong>
+        <span style="margin-left:8px; font-size:13px; color:var(--text-muted);">${escapeHtml(ncd.reason)}</span>
+      </div>
+      <div class="content-item-actions">
+        <div class="content-item-btn content-item-del" data-id="${ncd.id}" title="Eliminar">
+          <svg viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+      </div>
+    `;
+    list.appendChild(item);
+  });
+
+  list.querySelectorAll('.content-item-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      showConfirm('Eliminar día sin clase', '¿Deseas habilitar esta fecha para clases de nuevo?', () => {
+        // Optimistic update
+        state.nonClassDays = state.nonClassDays.filter(ncd => ncd.id !== id);
+        renderNonClassList();
+        renderHome();
+        if (state.currentStudentId) {
+          const student = state.students.find(s => s.id === state.currentStudentId);
+          if (student) renderStudentDetail(student);
+        }
+        dbDeleteNonClassDay(id).catch(err => {
+          console.error("Error deleting non-class day", err);
+          showToast('⚠️ Error al eliminar en la nube');
+        });
+      });
+    });
+  });
+}
+
+async function saveNonClassDay() {
+  const dateInput = document.getElementById('non-class-date');
+  const reasonInput = document.getElementById('non-class-reason');
+  const date = dateInput.value;
+  const reason = reasonInput.value.trim();
+
+  if (!date || !reason) {
+    showToast('⚠️ Por favor completa la fecha y el motivo.');
+    return;
+  }
+
+  // Check if date already exists
+  if (state.nonClassDays.some(ncd => ncd.date === date)) {
+    showToast('⚠️ Esta fecha ya está registrada.');
+    return;
+  }
+
+  const newNCD = {
+    id: 'ncd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    date,
+    reason,
+    schoolId: state.currentSchoolId,
+    courseId: state.currentCourseId,
+    createdAt: new Date().toISOString()
+  };
+
+  // Optimistic update
+  state.nonClassDays.push(newNCD);
+  reasonInput.value = '';
+  renderNonClassList();
+  renderHome();
+  
+  if (state.currentStudentId) {
+    const student = state.students.find(s => s.id === state.currentStudentId);
+    if (student) renderStudentDetail(student);
+  }
+
+  dbPutNonClassDay(newNCD).catch(err => {
+    console.error("Error saving non-class day", err);
+    showToast('⚠️ Error al guardar en la nube');
   });
 }
 
