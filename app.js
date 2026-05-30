@@ -421,10 +421,36 @@ function getAttendanceStats(student) {
 
 function getAverage(grades) {
   if (!grades || grades.length === 0) return null;
-  const numericGrades = grades.filter(g => typeof g.value === 'number');
-  if (numericGrades.length === 0) return null;
-  const sum = numericGrades.reduce((a, g) => a + g.value, 0);
-  return (sum / numericGrades.length).toFixed(1);
+  
+  const effectiveValues = grades.map(g => {
+    if (g.recuperatorio !== undefined && g.recuperatorio !== null) {
+      return g.recuperatorio;
+    }
+    return g.value;
+  });
+
+  const numericGrades = effectiveValues.filter(val => typeof val === 'number');
+  
+  if (numericGrades.length > 0) {
+    const sum = numericGrades.reduce((a, val) => a + val, 0);
+    return (sum / numericGrades.length).toFixed(1);
+  }
+
+  const uniqueVals = Array.from(new Set(effectiveValues.filter(val => val !== null && val !== undefined)));
+  if (uniqueVals.length === 0) return null;
+  if (uniqueVals.length === 1) {
+    return uniqueVals[0];
+  }
+  return uniqueVals.join('/');
+}
+
+function getGradeBadgeClass(avg) {
+  if (avg === null || avg === undefined) return '';
+  const val = parseFloat(avg);
+  if (isNaN(val)) {
+    return 'red';
+  }
+  return val >= 7 ? 'green' : 'red';
 }
 
 function getInitials(name) {
@@ -632,8 +658,8 @@ function renderStudentList() {
         <div class="student-card-name">${escapeHtml(s.name)}</div>
         <div class="student-card-meta">
           <span class="mini-badge ${badgeClass}">${stats.pct}% asistencia</span>
-          ${avgP !== null ? `<span class="mini-badge green">P: ${avgP}</span>` : ''}
-          ${avgT !== null ? `<span class="mini-badge green">T: ${avgT}</span>` : ''}
+          ${avgP !== null ? `<span class="mini-badge ${getGradeBadgeClass(avgP)}">P: ${avgP}</span>` : ''}
+          ${avgT !== null ? `<span class="mini-badge ${getGradeBadgeClass(avgT)}">T: ${avgT}</span>` : ''}
           ${s.medico?.ficha ? '<span class="mini-badge gray">📋 Ficha</span>' : ''}
           ${s.active === false ? '<span class="mini-badge red">DESACTIVADO</span>' : ''}
         </div>
@@ -671,8 +697,8 @@ function renderStudentDetail(student) {
   const avgT = getAverage(student.grades.teorica);
   document.getElementById('detail-badges').innerHTML = `
     <span class="mini-badge ${getAttendanceBadgeClass(stats.pct)}">${stats.pct}% asistencia</span>
-    ${avgP !== null ? `<span class="mini-badge green">P: ${avgP}</span>` : ''}
-    ${avgT !== null ? `<span class="mini-badge green">T: ${avgT}</span>` : ''}
+    ${avgP !== null ? `<span class="mini-badge ${getGradeBadgeClass(avgP)}">P: ${avgP}</span>` : ''}
+    ${avgT !== null ? `<span class="mini-badge ${getGradeBadgeClass(avgT)}">T: ${avgT}</span>` : ''}
     ${student.medico?.ficha ? '<span class="mini-badge gray">📋 Ficha entregada</span>' : ''}
     ${student.active === false ? '<span class="mini-badge red">DESACTIVADO</span>' : ''}
   `;
